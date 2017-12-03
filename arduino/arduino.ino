@@ -10,12 +10,12 @@
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature tempSensor(&oneWire);
 
-double fTempSet = 65, fTempActual;
+double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-255
 
 // PID controller parameters
-#define PID_kP 25.5
-#define PID_kI 1
+#define PID_kP 10
+#define PID_kI 0.5
 #define PID_kD 0
 
 PID oPID(&fTempActual, &fPidOutput, &fTempSet, PID_kP, PID_kI, PID_kD, DIRECT);
@@ -54,6 +54,9 @@ void wait_for_attachment()
     display.display();
     delay(1000);
   }
+
+  servo.write(SERVO_MIN_DEG);
+  delay(2000);
 }
 void setup() {
   
