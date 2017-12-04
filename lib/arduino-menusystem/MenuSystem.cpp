@@ -350,44 +350,7 @@ bool NumericMenuItem::prev(bool loop) {
 }
 
 // NumericDisplayMenuItem
-NumericDisplayMenuItem::NumericDisplayMenuItem(const char* basename, SelectFnPtr select_fn, FormatValueFnPtr format_value_fn,
-                                               float value)
-        : MenuItem(basename, select_fn),
-          _format_value_fn(format_value_fn),
-          _value(value) {};
-
-
-Menu* NumericDisplayMenuItem::select() {
-    // no selection wanted
-    if (_select_fn != nullptr)
-        _select_fn(this);
-    return nullptr;
-}
-
-void NumericDisplayMenuItem::render(MenuComponentRenderer const& renderer) const {
-    renderer.render_numeric_display_menu_item(*this);
-}
-
-float NumericDisplayMenuItem::get_value() const {
-    return _value;
-}
-
-void NumericDisplayMenuItem::set_number_formatter(FormatValueFnPtr format_value_fn) {
-    _format_value_fn = format_value_fn;
-}
-
-String NumericDisplayMenuItem::get_formatted_value() const {
-    String buffer;
-    if (_format_value_fn != nullptr)
-        buffer += _format_value_fn(_value);
-    else
-        buffer += _value;
-    return buffer;
-}
-
-void NumericDisplayMenuItem::set_value(float value) {
-    _value = value;
-}
+// Header only
 // NumericDisplayMenuItem
 
 // *********************************************************

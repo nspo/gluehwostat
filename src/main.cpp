@@ -14,7 +14,7 @@ double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-255
 
 // PID controller parameters
-#define PID_kP_default 10
+#define PID_kP_default 0.1
 #define PID_kI_default 0.5
 #define PID_kD_default 0
 
@@ -105,7 +105,7 @@ class DefaultRenderer : public MenuComponentRenderer
         lcd.print(menu_item.get_formatted_value());
     }
 
-    void render_numeric_display_menu_item(NumericDisplayMenuItem const &menu_item) const
+    void render_numeric_display_menu_item(NumericDisplayMenuItem<float> const &menu_item) const
     {
         lcd.print(menu_item.get_name());
         lcd.print(": ");
@@ -118,29 +118,46 @@ class DefaultRenderer : public MenuComponentRenderer
     }
 };
 
+void setPidOutput(const float& fNew);
+void resetPidState()
+{
+    // cycle from MANUAL to AUTOMATIC to reset outputSum (I state of PID controller)
+
+    setPidOutput(0.0);
+    oPID.SetMode(MANUAL);
+    oPID.SetMode(AUTOMATIC);
+
+    oPID.SetSampleTime(125); // measured loop delay
+}
+
+void onPidReset(MenuComponent *comp)
+{
+    resetPidState();
+}
+
 DefaultRenderer my_renderer;
 
 // Menu variables
 MenuSystem ms(my_renderer);
 
 Menu menu_i1("Temperature [dC]");
-NumericDisplayMenuItem menu_tempActual("Actual", NULL, NULL, 23.2);
+NumericDisplayMenuItem<float> menu_tempActual("Actual", NULL, NULL, 23.2);
 NumericMenuItem menu_tempSet("Set", NULL, 69, 0, 99, 0.5, NULL);
 
 Menu menu_i2("PID values");
-NumericDisplayMenuItem menu_pidOut("PID out", NULL, NULL, 999);
-NumericDisplayMenuItem menu_servoPos("Servo pos", NULL, NULL, 999);
-NumericMenuItem menu_pidKP("k_P", NULL, 10, 0, 99, 0.5, NULL);
-NumericMenuItem menu_pidKI("k_I", NULL, 0.5, 0, 99, 0.02, NULL);
-NumericMenuItem menu_pidKD("k_D", NULL, 0, 0, 99, 0.1, NULL);
-MenuItem menu_pidReset("Reset PID state", NULL);
+NumericDisplayMenuItem<float> menu_pidOut("PID out", NULL, NULL, 999);
+NumericDisplayMenuItem<float> menu_servoPos("Servo pos", NULL, NULL, 999);
+NumericMenuItem menu_pidKP("k_P", NULL, PID_kP_default, 0, 99, 0.5, NULL);
+NumericMenuItem menu_pidKI("k_I", NULL, PID_kI_default, 0, 99, 0.02, NULL);
+NumericMenuItem menu_pidKD("k_D", NULL, PID_kD_default, 0, 99, 0.1, NULL);
+MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
 Menu menu_i3("Manual mode[deg]");
 NumericMenuItem menu_manualMode("Manual", NULL, 0, 0, 1, 1.0, &MenuHelpers::format_int);
 NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 2.5, NULL);
 
 Menu menu_i4("Misc debug");
-NumericDisplayMenuItem menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
+NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
 
 // Servo
 #include <Servo.h>
@@ -219,8 +236,7 @@ void setup()
     tempSensor.requestTemperatures();
     setTempActual(tempSensor.getTempCByIndex(0));
 
-    oPID.SetMode(AUTOMATIC);
-    oPID.SetSampleTime(125); // measured loop delay
+    resetPidState();
 
     servo.attach(SERVO_PIN);
 
@@ -298,7 +314,7 @@ void setServoPos(const float &fNew)
 
 void setPidOutput(const float &fNew)
 {
-    // fPidOutput is changed by oPID itself
+    fPidOutput = fNew;
     menu_pidOut.set_value(fNew);
 }
 
@@ -309,29 +325,41 @@ void setTempSet(const float &fNew)
 
 void loop()
 {
-    // PID parameters
-    oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value());
-    setTempSet(menu_tempSet.get_value());
+    if ((int)menu_manualMode.get_value() == 0)
+    {
+        // automatic
 
-    tempSensor.requestTemperatures();
-    setTempActual(tempSensor.getTempCByIndex(0));
-    //setTempActual(63); //fake
-    oPID.Compute();
-    setPidOutput(fPidOutput);
+        // PID parameters
+        oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value());
+        setTempSet(menu_tempSet.get_value());
 
-    setServoPos(get_knob_pos(fPidOutput));
-    servo.write(fServoPos);
+        tempSensor.requestTemperatures();
+        setTempActual(tempSensor.getTempCByIndex(0));
+        //setTempActual(63); //fake
+        oPID.Compute();
+        setPidOutput(fPidOutput);
 
-    // Serial.print(F("Current temperature: "));
-    // Serial.println(fTempActual);
-    // Serial.print(F("Set temperature: "));
-    // Serial.println(fTempSet);
-    // Serial.print(F("PID output: "));
-    // Serial.println(fPidOutput);
-    // Serial.print(F("Knob pos: "));
-    // Serial.println(fServoPos);
+        setServoPos(get_knob_pos(fPidOutput));
+        servo.write(fServoPos);
 
-    // Serial.println(F("---"));
+        // Serial.print(F("Current temperature: "));
+        // Serial.println(fTempActual);
+        // Serial.print(F("Set temperature: "));
+        // Serial.println(fTempSet);
+        // Serial.print(F("PID output: "));
+        // Serial.println(fPidOutput);
+        // Serial.print(F("Knob pos: "));
+        // Serial.println(fServoPos);
+
+        // Serial.println(F("---"));
+    }
+    else
+    {
+        // manual mode
+        setServoPos(menu_manualServoPos.get_value());
+        servo.write(fServoPos);
+        delay(100); // to keep normal loop lag - maybe not necessary, but display flashes
+    }
 
     btn_handler();
 
