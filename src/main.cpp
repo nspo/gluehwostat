@@ -5,7 +5,7 @@
 // PI controller
 #include <PID_v1.h>
 
-#define DS18B20_PIN 3
+#define DS18B20_PIN 24
 
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature tempSensor(&oneWire);
@@ -14,8 +14,8 @@ double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-255
 
 // PID controller parameters
-#define PID_kP_default 0.1
-#define PID_kI_default 0.5
+#define PID_kP_default 10
+#define PID_kI_default 0.4
 #define PID_kD_default 0
 
 PID oPID(&fTempActual, &fPidOutput, &fTempSet, PID_kP_default, PID_kI_default, PID_kD_default, DIRECT);
@@ -118,7 +118,7 @@ class DefaultRenderer : public MenuComponentRenderer
     }
 };
 
-void setPidOutput(const float& fNew);
+void setPidOutput(const float &fNew);
 void resetPidState()
 {
     // cycle from MANUAL to AUTOMATIC to reset outputSum (I state of PID controller)
@@ -135,6 +135,8 @@ void onPidReset(MenuComponent *comp)
     resetPidState();
 }
 
+void onPidParamChange(MenuComponent *comp);
+
 DefaultRenderer my_renderer;
 
 // Menu variables
@@ -147,9 +149,9 @@ NumericMenuItem menu_tempSet("Set", NULL, 69, 0, 99, 0.5, NULL);
 Menu menu_i2("PID values");
 NumericDisplayMenuItem<float> menu_pidOut("PID out", NULL, NULL, 999);
 NumericDisplayMenuItem<float> menu_servoPos("Servo pos", NULL, NULL, 999);
-NumericMenuItem menu_pidKP("k_P", NULL, PID_kP_default, 0, 99, 0.5, NULL);
-NumericMenuItem menu_pidKI("k_I", NULL, PID_kI_default, 0, 99, 0.02, NULL);
-NumericMenuItem menu_pidKD("k_D", NULL, PID_kD_default, 0, 99, 0.1, NULL);
+NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 99, 0.5, NULL);
+NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 99, 0.02, NULL);
+NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 99, 0.1, NULL);
 MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
 Menu menu_i3("Manual mode[deg]");
@@ -159,12 +161,17 @@ NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 2.5, NULL);
 Menu menu_i4("Misc debug");
 NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
 
+void onPidParamChange(MenuComponent *comp)
+{
+     oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value());
+}
+
 // Servo
 #include <Servo.h>
 
 #define SERVO_MIN_DEG 0
 #define SERVO_MAX_DEG 175
-#define SERVO_PIN 2
+#define SERVO_PIN 26
 Servo servo;
 
 double fServoPos;
@@ -325,16 +332,15 @@ void setTempSet(const float &fNew)
 
 void loop()
 {
+    setTempSet(menu_tempSet.get_value());
+
+    tempSensor.requestTemperatures();
+    setTempActual(tempSensor.getTempCByIndex(0));
+
     if ((int)menu_manualMode.get_value() == 0)
     {
         // automatic
 
-        // PID parameters
-        oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value());
-        setTempSet(menu_tempSet.get_value());
-
-        tempSensor.requestTemperatures();
-        setTempActual(tempSensor.getTempCByIndex(0));
         //setTempActual(63); //fake
         oPID.Compute();
         setPidOutput(fPidOutput);
