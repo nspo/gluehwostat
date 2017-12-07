@@ -240,6 +240,8 @@ void setup()
     Serial.begin(115200);
 
     tempSensor.begin();
+    tempSensor.setResolution(9);
+
     tempSensor.requestTemperatures();
     setTempActual(tempSensor.getTempCByIndex(0));
 
@@ -299,7 +301,8 @@ void btn_handler()
         }
         case btnSELECT:
         {
-            ms.select();
+            //ms.select();
+            ms.reset();
             break;
         }
         case btnNONE:
@@ -334,7 +337,11 @@ void loop()
 {
     setTempSet(menu_tempSet.get_value());
 
+    unsigned long nPreDbg = millis();
     tempSensor.requestTemperatures();
+    Serial.print("measuring temp took: ");
+    Serial.println(millis()-nPreDbg);
+
     setTempActual(tempSensor.getTempCByIndex(0));
 
     if ((int)menu_manualMode.get_value() == 0)
