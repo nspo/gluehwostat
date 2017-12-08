@@ -2,6 +2,17 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+// EEPROM stuff
+#include <EEPROM.h>
+#define EEPROM_ADDR_VALUES_SET  0 // whether EEPROM values have been set
+#define EEPROM_VALUES_SET_VALUE (unsigned long)0xDEADBEEF // test value
+
+#define EEPROM_ADDR_KP          0+sizeof(unsigned long)
+#define EEPROM_ADDR_KI          EEPROM_ADDR_KP+1*sizeof(double)
+#define EEPROM_ADDR_KD          EEPROM_ADDR_KP+2*sizeof(double)
+#define EEPROM_ADDR_TEMP_SET    EEPROM_ADDR_KP+3*sizeof(double)
+
+
 // PI controller
 #include <ArduPID.h>
 
@@ -15,9 +26,9 @@ DallasTemperature tempSensor(&oneWire);
 double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-255
 
-// PID controller parameters
-#define PID_kP_default 10
-#define PID_kI_default 0.4
+// PID controller parameters - before being read from EEPROM
+#define PID_kP_default 3.5
+#define PID_kI_default 0.2
 #define PID_kD_default 0
 
 #define PID_T 100 //PID cycle time in ms, target loop delay
@@ -135,7 +146,9 @@ void onPidReset(MenuComponent *comp)
     resetPidState();
 }
 
+void onTempSetChange(MenuComponent *comp);
 void onPidParamChange(MenuComponent *comp);
+void onDontUseEeprom(MenuComponent *comp);
 
 DefaultRenderer my_renderer;
 
@@ -144,14 +157,14 @@ MenuSystem ms(my_renderer);
 
 Menu menu_i1("Temperature [dC]");
 NumericDisplayMenuItem<float> menu_tempActual("Actual", NULL, NULL, 23.2);
-NumericMenuItem menu_tempSet("Set", NULL, 69, 0, 99, 0.5, NULL);
+NumericMenuItem menu_tempSet("Set", &onTempSetChange, 69, 0, 99, 0.5, NULL);
 
 Menu menu_i2("PID values");
 NumericDisplayMenuItem<float> menu_pidOut("PID out", NULL, NULL, 999);
 NumericDisplayMenuItem<float> menu_servoPos("Servo pos", NULL, NULL, 999);
-NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 99, 0.5, NULL);
-NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 99, 0.02, NULL);
-NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 99, 0.1, NULL);
+NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 30, 0.5, NULL);
+NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.02, NULL);
+NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.02, NULL);
 MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
 Menu menu_i3("Manual mode[deg]");
@@ -160,10 +173,33 @@ NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 2.5, NULL);
 
 Menu menu_i4("Misc debug");
 NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
+MenuItem menu_dontUseEeprom("Don't use EEPROM", &onDontUseEeprom);
 
-void onPidParamChange(MenuComponent *comp)
+void onTempSetChange(MenuComponent *comp = NULL)
+{
+    fTempSet = menu_tempSet.get_value();
+    EEPROM.put(EEPROM_ADDR_VALUES_SET, EEPROM_VALUES_SET_VALUE);
+    EEPROM.put(EEPROM_ADDR_TEMP_SET, menu_tempSet.get_value());
+}
+
+void onPidParamChange(MenuComponent *comp = NULL)
 {
     oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value(), 100);
+    EEPROM.put(EEPROM_ADDR_VALUES_SET, EEPROM_VALUES_SET_VALUE);
+    EEPROM.put(EEPROM_ADDR_KP, menu_pidKP.get_value());
+    EEPROM.put(EEPROM_ADDR_KI, menu_pidKI.get_value());
+    EEPROM.put(EEPROM_ADDR_KD, menu_pidKD.get_value());
+
+}
+
+void onDontUseEeprom(MenuComponent *comp)
+{
+    EEPROM.put(EEPROM_ADDR_VALUES_SET, (unsigned int)0x01010101);
+    lcd.clear();
+    lcd.setCursor(0,1);
+    lcd.write("Disabled EEPROM");
+    lcd.display();
+    delay(1000);
 }
 
 // Servo
@@ -199,6 +235,7 @@ void setup_menu()
 
     ms.get_root_menu().add_menu(&menu_i4);
     menu_i4.add_item(&menu_loopDelay);
+    menu_i4.add_item(&menu_dontUseEeprom);
 
     ms.display();
     nLastDisplayRefreshTime = millis();
@@ -235,10 +272,34 @@ void setTempActual(const float &fNew)
     menu_tempActual.set_value(fNew);
 }
 
+void read_eeprom_values()
+{
+    unsigned long testValue;
+    EEPROM.get(EEPROM_ADDR_VALUES_SET, testValue);
+
+    if(testValue == EEPROM_VALUES_SET_VALUE)
+    {
+        double kp, ki, kd, tempSet;
+        EEPROM.get(EEPROM_ADDR_KP, kp);
+        EEPROM.get(EEPROM_ADDR_KI, ki);
+        EEPROM.get(EEPROM_ADDR_KD, kd);
+        EEPROM.get(EEPROM_ADDR_TEMP_SET, tempSet);
+        menu_pidKP.set_value(kp);
+        menu_pidKI.set_value(ki);
+        menu_pidKD.set_value(kd);
+        onPidParamChange();
+        fTempSet = tempSet;
+        menu_tempSet.set_value(tempSet);
+        onTempSetChange();
+    }
+}
+
 void setup()
 {
-
     Serial.begin(115200);
+
+    fTempSet = menu_tempSet.get_value();
+    read_eeprom_values();
 
     tempSensor.begin();
     tempSensor.setResolution(DS18B20_RESOLUTION);
@@ -338,17 +399,10 @@ void setPidOutput(const float &fNew)
     menu_pidOut.set_value(fNew);
 }
 
-void setTempSet(const float &fNew)
-{
-    fTempSet = fNew;
-}
-
 void loop()
 {
     unsigned long nNow = millis();
     unsigned long nLoopDelay = nNow - nLastLoopExecTime;
-
-    setTempSet(menu_tempSet.get_value());
 
     if(nNow-nLastTempRequestTime > DS18B20_WAIT)
     {
