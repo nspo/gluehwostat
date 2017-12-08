@@ -6,6 +6,8 @@
 #include <ArduPID.h>
 
 #define DS18B20_PIN 24
+#define DS18B20_RESOLUTION 12 // 9-12
+#define DS18B20_WAIT 750 / (1 << (12 - DS18B20_RESOLUTION))
 
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature tempSensor(&oneWire);
@@ -18,9 +20,9 @@ double fPidOutput; // 0-255
 #define PID_kI_default 0.4
 #define PID_kD_default 0
 
-#define PID_T 120
+#define PID_T 100 //PID cycle time in ms, target loop delay
 
-PID_IC oPID(&fPidOutput, PID_kP_default, PID_kI_default, PID_kD_default, 100, PID_T);
+PID_IC oPID(&fPidOutput, PID_kP_default, PID_kI_default, PID_kD_default, 100, PID_T); // with clamping as anti windup
 
 // display
 #include <MenuSystem.h>
@@ -173,7 +175,7 @@ void onPidParamChange(MenuComponent *comp)
 Servo servo;
 
 double fServoPos;
-unsigned long nLastLoopExecTime = 0, nLastPidExecTime = 0;
+unsigned long nLastLoopExecTime = 0, nLastPidExecTime = 0, nLastTempRequestTime = 0, nLastDisplayRefreshTime = 0;
 
 void setup_menu()
 {
@@ -199,6 +201,7 @@ void setup_menu()
     menu_i4.add_item(&menu_loopDelay);
 
     ms.display();
+    nLastDisplayRefreshTime = millis();
 }
 
 void wait_for_attachment()
@@ -223,7 +226,7 @@ void wait_for_attachment()
     }
 
     servo.write(SERVO_MIN_DEG);
-    delay(2000);
+    delay(1000);
 }
 
 void setTempActual(const float &fNew)
@@ -238,10 +241,11 @@ void setup()
     Serial.begin(115200);
 
     tempSensor.begin();
-    tempSensor.setResolution(9);
+    tempSensor.setResolution(DS18B20_RESOLUTION);
+    tempSensor.setWaitForConversion(false);
 
     tempSensor.requestTemperatures();
-    setTempActual(tempSensor.getTempCByIndex(0));
+    nLastTempRequestTime = millis();
 
     resetPidState();
 
@@ -252,6 +256,14 @@ void setup()
     wait_for_attachment();
 
     setup_menu(); // real menu
+
+    // wait manually this time for temp reading if necessary
+    while (millis() - nLastTempRequestTime < DS18B20_WAIT) {}
+    setTempActual(tempSensor.getTempCByIndex(0));
+
+    // request again but do not wait
+    tempSensor.requestTemperatures();
+    nLastTempRequestTime = millis();
 }
 
 double get_knob_pos(double fIntensity)
@@ -334,19 +346,16 @@ void setTempSet(const float &fNew)
 void loop()
 {
     unsigned long nNow = millis();
+    unsigned long nLoopDelay = nNow - nLastLoopExecTime;
 
     setTempSet(menu_tempSet.get_value());
 
-    //unsigned long nPreDbg = millis();
-    tempSensor.requestTemperatures();
-    //Serial.print("measuring temp took: ");
-    //Serial.println(millis()-nPreDbg);
-
-    setTempActual(tempSensor.getTempCByIndex(0));
-
-    // Serial.print(millis());
-    // Serial.print(";");
-    // Serial.println(fTempActual);
+    if(nNow-nLastTempRequestTime > DS18B20_WAIT)
+    {
+        setTempActual(tempSensor.getTempCByIndex(0));
+        tempSensor.requestTemperatures();
+        nLastTempRequestTime = millis(); // request again
+    }
 
     if ((int)menu_manualMode.get_value() == 0)
     {
@@ -364,7 +373,6 @@ void loop()
             setServoPos(get_knob_pos(fPidOutput));
             servo.write(fServoPos);
         }
-
     }
     else
     {
@@ -375,8 +383,12 @@ void loop()
 
     btn_handler();
 
-    menu_loopDelay.set_value(nNow - nLastLoopExecTime);
+    menu_loopDelay.set_value(nLoopDelay);
     nLastLoopExecTime = nNow;
 
-    ms.display();
+    if(nNow-nLastDisplayRefreshTime > 200)
+    {
+        ms.display();
+        nLastDisplayRefreshTime = nNow;
+    }
 }
