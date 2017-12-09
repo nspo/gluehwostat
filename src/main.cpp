@@ -4,13 +4,10 @@
 
 // EEPROM stuff
 #include <EEPROM.h>
-#define EEPROM_ADDR_VALUES_SET  0 // whether EEPROM values have been set
-#define EEPROM_VALUES_SET_VALUE (unsigned long)0xDEADBEEF // test value
-
-#define EEPROM_ADDR_KP          0+sizeof(unsigned long)
-#define EEPROM_ADDR_KI          EEPROM_ADDR_KP+1*sizeof(double)
-#define EEPROM_ADDR_KD          EEPROM_ADDR_KP+2*sizeof(double)
-#define EEPROM_ADDR_TEMP_SET    EEPROM_ADDR_KP+3*sizeof(double)
+#define EEPROM_ADDR_KP          0
+#define EEPROM_ADDR_KI          0+1*sizeof(double)
+#define EEPROM_ADDR_KD          0+2*sizeof(double)
+#define EEPROM_ADDR_TEMP_SET    0+3*sizeof(double)
 
 
 // PI controller
@@ -148,7 +145,9 @@ void onPidReset(MenuComponent *comp)
 
 void onTempSetChange(MenuComponent *comp);
 void onPidParamChange(MenuComponent *comp);
-void onDontUseEeprom(MenuComponent *comp);
+
+void onSaveToEeprom(MenuComponent *comp);
+void onReadFromEeprom(MenuComponent *comp);
 
 DefaultRenderer my_renderer;
 
@@ -173,33 +172,55 @@ NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 2.5, NULL);
 
 Menu menu_i4("Misc debug");
 NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
-MenuItem menu_dontUseEeprom("Don't use EEPROM", &onDontUseEeprom);
+MenuItem menu_readFromEeprom("Read from EEPROM", &onReadFromEeprom);
+MenuItem menu_saveToEeprom("Save to EEPROM", &onSaveToEeprom);
 
 void onTempSetChange(MenuComponent *comp = NULL)
 {
     fTempSet = menu_tempSet.get_value();
-    EEPROM.put(EEPROM_ADDR_VALUES_SET, EEPROM_VALUES_SET_VALUE);
-    EEPROM.put(EEPROM_ADDR_TEMP_SET, menu_tempSet.get_value());
 }
 
 void onPidParamChange(MenuComponent *comp = NULL)
 {
     oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value(), 100);
-    EEPROM.put(EEPROM_ADDR_VALUES_SET, EEPROM_VALUES_SET_VALUE);
+}
+
+void showShortMsg(const char* msg1, const char* msg2, uint16_t delayTime = 1000)
+{
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.write(msg1);
+    lcd.setCursor(0,1);
+    lcd.write(msg2);
+    lcd.display();
+    delay(delayTime);
+}
+
+void onSaveToEeprom(MenuComponent *comp)
+{
+    EEPROM.put(EEPROM_ADDR_TEMP_SET, menu_tempSet.get_value());
     EEPROM.put(EEPROM_ADDR_KP, menu_pidKP.get_value());
     EEPROM.put(EEPROM_ADDR_KI, menu_pidKI.get_value());
     EEPROM.put(EEPROM_ADDR_KD, menu_pidKD.get_value());
-
+    showShortMsg("<Success>", "Saved to EEPROM");
 }
 
-void onDontUseEeprom(MenuComponent *comp)
+void onReadFromEeprom(MenuComponent *comp)
 {
-    EEPROM.put(EEPROM_ADDR_VALUES_SET, (unsigned int)0x01010101);
-    lcd.clear();
-    lcd.setCursor(0,1);
-    lcd.write("Disabled EEPROM");
-    lcd.display();
-    delay(1000);
+    double kp, ki, kd, tempSet;
+    EEPROM.get(EEPROM_ADDR_KP, kp);
+    EEPROM.get(EEPROM_ADDR_KI, ki);
+    EEPROM.get(EEPROM_ADDR_KD, kd);
+    EEPROM.get(EEPROM_ADDR_TEMP_SET, tempSet);
+    menu_pidKP.set_value(kp);
+    menu_pidKI.set_value(ki);
+    menu_pidKD.set_value(kd);
+    onPidParamChange();
+    fTempSet = tempSet;
+    menu_tempSet.set_value(tempSet);
+    onTempSetChange();
+
+    showShortMsg("<Success>", "Read EEPROM");
 }
 
 // Servo
@@ -235,7 +256,8 @@ void setup_menu()
 
     ms.get_root_menu().add_menu(&menu_i4);
     menu_i4.add_item(&menu_loopDelay);
-    menu_i4.add_item(&menu_dontUseEeprom);
+    menu_i4.add_item(&menu_readFromEeprom);
+    menu_i4.add_item(&menu_saveToEeprom);
 
     ms.display();
     nLastDisplayRefreshTime = millis();
@@ -255,7 +277,7 @@ void wait_for_attachment()
 
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("ATTACH @MAX NOW");
+        lcd.print(F("ATTACH @MAX NOW"));
         lcd.setCursor(7, 1);
 
         lcd.print(i);
@@ -272,34 +294,11 @@ void setTempActual(const float &fNew)
     menu_tempActual.set_value(fNew);
 }
 
-void read_eeprom_values()
-{
-    unsigned long testValue;
-    EEPROM.get(EEPROM_ADDR_VALUES_SET, testValue);
-
-    if(testValue == EEPROM_VALUES_SET_VALUE)
-    {
-        double kp, ki, kd, tempSet;
-        EEPROM.get(EEPROM_ADDR_KP, kp);
-        EEPROM.get(EEPROM_ADDR_KI, ki);
-        EEPROM.get(EEPROM_ADDR_KD, kd);
-        EEPROM.get(EEPROM_ADDR_TEMP_SET, tempSet);
-        menu_pidKP.set_value(kp);
-        menu_pidKI.set_value(ki);
-        menu_pidKD.set_value(kd);
-        onPidParamChange();
-        fTempSet = tempSet;
-        menu_tempSet.set_value(tempSet);
-        onTempSetChange();
-    }
-}
-
 void setup()
 {
     Serial.begin(115200);
 
     fTempSet = menu_tempSet.get_value();
-    read_eeprom_values();
 
     tempSensor.begin();
     tempSensor.setResolution(DS18B20_RESOLUTION);
