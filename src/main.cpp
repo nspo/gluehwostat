@@ -21,14 +21,15 @@ OneWire oneWire(DS18B20_PIN);
 DallasTemperature tempSensor(&oneWire);
 
 double fTempSet = 70, fTempActual;
-double fPidOutput; // 0-255
+double fPidOutput; // 0-PID_MAX_VALUE
 
 // PID controller parameters - before being read from EEPROM
-#define PID_kP_default 3.5
-#define PID_kI_default 0.2
+#define PID_kP_default 1.4
+#define PID_kI_default 0
 #define PID_kD_default 0
 
 #define PID_T 100 //PID cycle time in ms, target loop delay
+#define PID_MAX_VALUE 100 // pid output is between 0 and this
 
 PID_IC oPID(&fPidOutput, PID_kP_default, PID_kI_default, PID_kD_default, 100, PID_T); // with clamping as anti windup
 
@@ -134,7 +135,7 @@ void setPidOutput(const float &fNew);
 void resetPidState()
 {
     setPidOutput(0.0);
-    oPID.SetSaturation(0, 255);
+    oPID.SetSaturation(0, PID_MAX_VALUE);
     oPID.Reset();
 }
 
@@ -160,15 +161,15 @@ NumericMenuItem menu_tempSet("Set", &onTempSetChange, 69, 0, 99, 0.5, NULL);
 
 Menu menu_i2("PID values");
 NumericDisplayMenuItem<float> menu_pidOut("PID out", NULL, NULL, 999);
-NumericDisplayMenuItem<float> menu_servoPos("Servo pos", NULL, NULL, 999);
-NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 30, 0.5, NULL);
-NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.02, NULL);
-NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.02, NULL);
+NumericDisplayMenuItem<float> menu_curDutyCycle("DutyCyc", NULL, &MenuHelpers::format_int, 0);
+NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 10, 0.025, NULL);
+NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.001, NULL);
+NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.001, NULL);
 MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
 Menu menu_i3("Manual mode[deg]");
 NumericMenuItem menu_manualMode("Manual", NULL, 0, 0, 1, 1.0, &MenuHelpers::format_int);
-NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 2.5, NULL);
+NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 10, NULL);
 
 Menu menu_i4("Misc debug");
 NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
@@ -231,7 +232,15 @@ void onReadFromEeprom(MenuComponent *comp)
 #define SERVO_PIN 26
 Servo servo;
 
-double fServoPos;
+// Heater manual KnobPWM(tm)
+bool bHeaterOn = false;
+#define PWM_CYCLE_LENGTH 10000
+unsigned long nPwmTimeOnCurrentCycle = 0*PWM_CYCLE_LENGTH; // time heater should be on
+unsigned long nPwmBeginThisCycle = 0; 
+double fPwmNextDutyCycle = 0; // intensity of next cycle
+#define PWM_MIN_DUTY_CYCLE_ABOVE_0 (double)500/PWM_CYCLE_LENGTH // either duty cycle of 0 or this value, so that motor does not have to turn again after only e.g. 50 ms
+
+
 unsigned long nLastLoopExecTime = 0, nLastPidExecTime = 0, nLastTempRequestTime = 0, nLastDisplayRefreshTime = 0;
 
 void setup_menu()
@@ -244,7 +253,7 @@ void setup_menu()
 
     ms.get_root_menu().add_menu(&menu_i2);
     menu_i2.add_item(&menu_pidOut);
-    menu_i2.add_item(&menu_servoPos);
+    menu_i2.add_item(&menu_curDutyCycle);
     menu_i2.add_item(&menu_pidKP);
     menu_i2.add_item(&menu_pidKI);
     menu_i2.add_item(&menu_pidKD);
@@ -324,20 +333,7 @@ void setup()
     // request again but do not wait
     tempSensor.requestTemperatures();
     nLastTempRequestTime = millis();
-}
 
-double get_knob_pos(double fIntensity)
-{
-    // PID output value to servo position
-    // intensity from 0 - 255
-    if (fIntensity < 0 || fIntensity > 255)
-    {
-        Serial.println(F("Illegal intensity value"));
-    }
-
-    double fServoPos = map(fIntensity, 0, 255, SERVO_MIN_DEG, SERVO_MAX_DEG);
-
-    return fServoPos;
 }
 
 void btn_handler()
@@ -386,12 +382,6 @@ void btn_handler()
     }
 }
 
-void setServoPos(const float &fNew)
-{
-    fServoPos = fNew;
-    menu_servoPos.set_value(fServoPos);
-}
-
 void setPidOutput(const float &fNew)
 {
     fPidOutput = fNew;
@@ -423,15 +413,54 @@ void loop()
             oPID.Compute(fCurrentErr);
             setPidOutput(fPidOutput);
 
-            setServoPos(get_knob_pos(fPidOutput));
-            servo.write(fServoPos);
+            fPwmNextDutyCycle = fPidOutput/PID_MAX_VALUE;
+            if(fPwmNextDutyCycle < PWM_MIN_DUTY_CYCLE_ABOVE_0 && fPwmNextDutyCycle > 0)
+            {
+                // round
+                if(fPwmNextDutyCycle >= PWM_MIN_DUTY_CYCLE_ABOVE_0 / 2)
+                {
+                    fPwmNextDutyCycle = PWM_MIN_DUTY_CYCLE_ABOVE_0;
+                }
+                else
+                {
+                    fPwmNextDutyCycle = 0;
+                }
+            }
         }
+
+        // check whether to turn heater off
+        if(bHeaterOn)
+        {
+            if(nNow - nPwmBeginThisCycle > nPwmTimeOnCurrentCycle)
+            {
+                // turn off
+                servo.write(SERVO_MIN_DEG);
+                bHeaterOn = false;
+            }
+            // else wait until ON cycle is over
+        }
+
+        // check for cycle end
+        if(nNow - nPwmBeginThisCycle > PWM_CYCLE_LENGTH)
+        {
+            // turn on to begin new cycle
+            nPwmBeginThisCycle = nNow;
+            nPwmTimeOnCurrentCycle = (fPwmNextDutyCycle*PWM_CYCLE_LENGTH);
+            menu_curDutyCycle.set_value(nPwmTimeOnCurrentCycle);
+            Serial.println(fPwmNextDutyCycle);
+            Serial.println(nPwmTimeOnCurrentCycle);
+            if(nPwmTimeOnCurrentCycle > 0)
+            {
+                servo.write(SERVO_MAX_DEG);
+                bHeaterOn = true;
+            }
+        }
+
     }
     else
     {
         // manual mode
-        setServoPos(menu_manualServoPos.get_value());
-        servo.write(fServoPos);
+        servo.write(menu_manualServoPos.get_value());
     }
 
     btn_handler();
