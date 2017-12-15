@@ -27,8 +27,8 @@ double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-PID_MAX_VALUE
 
 // PID controller parameters - before being read from EEPROM
-#define PID_kP_default 1.4
-#define PID_kI_default 0
+#define PID_kP_default 10
+#define PID_kI_default 0.4
 #define PID_kD_default 0
 
 #define PID_T 100         //PID cycle time in ms, target loop delay
@@ -165,9 +165,9 @@ NumericMenuItem menu_tempSet("Set", &onTempSetChange, 69, 0, 99, 0.5, NULL);
 Menu menu_i2("PID values");
 NumericDisplayMenuItem<float> menu_pidOut("PID out", NULL, NULL, 999);
 NumericDisplayMenuItem<float> menu_curDutyCycle("DutyCyc", NULL, &MenuHelpers::format_int, 0);
-NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 10, 0.025, NULL);
-NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.001, NULL);
-NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.001, NULL);
+NumericMenuItem menu_pidKP("k_P", &onPidParamChange, PID_kP_default, 0, 30, 0.1, NULL);
+NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.01, NULL);
+NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.01, NULL);
 MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
 Menu menu_i3("Manual mode");
