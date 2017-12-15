@@ -3,6 +3,6 @@
 PID controller based hot wine punch temperature regulator
 
 - Arduino Uno/Mega
-- Menu on a LCD keypad shield
+- Menu on an LCD keypad shield (display current temperature, pid state, change parameters, manual mode, etc.)
 - DS18B20 temperature sensor
-- Servo motor for controlling hot plate
+- Relay for controlling hot plate power with slow "PWM" (e.g. 1 second on, 4 seconds off = 20% power)
