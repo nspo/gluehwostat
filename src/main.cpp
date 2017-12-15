@@ -230,11 +230,11 @@ void onReadFromEeprom(MenuComponent *comp)
 // Heater control with relay
 #define RELAIS_PIN A3
 bool bHeaterOn = false;
-#define PWM_CYCLE_LENGTH 10000
+#define PWM_CYCLE_LENGTH 5000
 unsigned long nPwmTimeOnCurrentCycle = 0 * PWM_CYCLE_LENGTH; // time heater should be on
 unsigned long nPwmBeginThisCycle = 0;
 double fPwmNextDutyCycle = 0;                                     // intensity of next cycle
-#define PWM_MIN_DUTY_CYCLE_ABOVE_0 ((double)500 / PWM_CYCLE_LENGTH) // either duty cycle of 0 or this value, so that motor does not have to turn again after only e.g. 50 ms
+#define PWM_MIN_DUTY_CYCLE_ABOVE_0 ((double)250 / PWM_CYCLE_LENGTH) // either duty cycle of 0 or this value, so that motor does not have to turn again after only e.g. 50 ms
 #define PWM_MAX_DUTY_CYCLE_BELOW_MAX (1-PWM_MIN_DUTY_CYCLE_ABOVE_0)
 
 unsigned long nLastLoopExecTime = 0, nLastPidExecTime = 0, nLastTempRequestTime = 0, nLastDisplayRefreshTime = 0;
@@ -282,7 +282,7 @@ void message_on_boot()
         lcd.setCursor(0, 0);
         lcd.print(F("GLUEHWOSTAT v2.0"));
         lcd.setCursor(7, 1);
-        lcd.print((int)((nStartTime+3000-millis())/1000));
+        lcd.print((int)((nStartTime+3000-millis())/1000)+1);
         delay(200); // so display does not blink
     }
 }
