@@ -1,24 +1,27 @@
+// Tone generation
+// not yet implemented
+#define TONE_PIN 3
+
 // DS18B20
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-// EEPROM stuff
-#include <EEPROM.h>
-#define EEPROM_ADDR_KP          0
-#define EEPROM_ADDR_KI          0+1*sizeof(double)
-#define EEPROM_ADDR_KD          0+2*sizeof(double)
-#define EEPROM_ADDR_TEMP_SET    0+3*sizeof(double)
-
-
-// PI controller
-#include <ArduPID.h>
-
-#define DS18B20_PIN 24
+#define DS18B20_PIN 2
 #define DS18B20_RESOLUTION 12 // 9-12
 #define DS18B20_WAIT 750 / (1 << (12 - DS18B20_RESOLUTION))
 
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature tempSensor(&oneWire);
+
+// EEPROM stuff
+#include <EEPROM.h>
+#define EEPROM_ADDR_KP 0
+#define EEPROM_ADDR_KI 0 + 1 * sizeof(double)
+#define EEPROM_ADDR_KD 0 + 2 * sizeof(double)
+#define EEPROM_ADDR_TEMP_SET 0 + 3 * sizeof(double)
+
+// PI controller
+#include <ArduPID.h>
 
 double fTempSet = 70, fTempActual;
 double fPidOutput; // 0-PID_MAX_VALUE
@@ -28,7 +31,7 @@ double fPidOutput; // 0-PID_MAX_VALUE
 #define PID_kI_default 0
 #define PID_kD_default 0
 
-#define PID_T 100 //PID cycle time in ms, target loop delay
+#define PID_T 100         //PID cycle time in ms, target loop delay
 #define PID_MAX_VALUE 100 // pid output is between 0 and this
 
 PID_IC oPID(&fPidOutput, PID_kP_default, PID_kI_default, PID_kD_default, 100, PID_T); // with clamping as anti windup
@@ -167,9 +170,9 @@ NumericMenuItem menu_pidKI("k_I", &onPidParamChange, PID_kI_default, 0, 10, 0.00
 NumericMenuItem menu_pidKD("k_D", &onPidParamChange, PID_kD_default, 0, 10, 0.001, NULL);
 MenuItem menu_pidReset("Reset PID state", &onPidReset);
 
-Menu menu_i3("Manual mode[deg]");
-NumericMenuItem menu_manualMode("Manual", NULL, 0, 0, 1, 1.0, &MenuHelpers::format_int);
-NumericMenuItem menu_manualServoPos("Servo", NULL, 0, 0, 175, 10, NULL);
+Menu menu_i3("Manual mode");
+NumericMenuItem menu_manualMode("Manual (0/1)", NULL, 0, 0, 1, 1.0, &MenuHelpers::format_int);
+NumericMenuItem menu_manualPower("Power", NULL, 0, 0, PID_MAX_VALUE, 10, NULL);
 
 Menu menu_i4("Misc debug");
 NumericDisplayMenuItem<float> menu_loopDelay("LoopLag", NULL, &MenuHelpers::format_int, -1);
@@ -186,12 +189,12 @@ void onPidParamChange(MenuComponent *comp = NULL)
     oPID.SetTunings(menu_pidKP.get_value(), menu_pidKI.get_value(), menu_pidKD.get_value(), 100);
 }
 
-void showShortMsg(const char* msg1, const char* msg2, uint16_t delayTime = 1000)
+void showShortMsg(const char *msg1, const char *msg2, uint16_t delayTime = 1000)
 {
     lcd.clear();
-    lcd.setCursor(0,0);
+    lcd.setCursor(0, 0);
     lcd.write(msg1);
-    lcd.setCursor(0,1);
+    lcd.setCursor(0, 1);
     lcd.write(msg2);
     lcd.display();
     delay(delayTime);
@@ -224,22 +227,14 @@ void onReadFromEeprom(MenuComponent *comp)
     showShortMsg("<Success>", "Read EEPROM");
 }
 
-// Servo
-#include <Servo.h>
-
-#define SERVO_MIN_DEG 0
-#define SERVO_MAX_DEG 175
-#define SERVO_PIN 26
-Servo servo;
-
-// Heater manual KnobPWM(tm)
+// Heater control with relay
+#define RELAIS_PIN A3
 bool bHeaterOn = false;
 #define PWM_CYCLE_LENGTH 10000
-unsigned long nPwmTimeOnCurrentCycle = 0*PWM_CYCLE_LENGTH; // time heater should be on
-unsigned long nPwmBeginThisCycle = 0; 
-double fPwmNextDutyCycle = 0; // intensity of next cycle
-#define PWM_MIN_DUTY_CYCLE_ABOVE_0 (double)500/PWM_CYCLE_LENGTH // either duty cycle of 0 or this value, so that motor does not have to turn again after only e.g. 50 ms
-
+unsigned long nPwmTimeOnCurrentCycle = 0 * PWM_CYCLE_LENGTH; // time heater should be on
+unsigned long nPwmBeginThisCycle = 0;
+double fPwmNextDutyCycle = 0;                                     // intensity of next cycle
+#define PWM_MIN_DUTY_CYCLE_ABOVE_0 (double)500 / PWM_CYCLE_LENGTH // either duty cycle of 0 or this value, so that motor does not have to turn again after only e.g. 50 ms
 
 unsigned long nLastLoopExecTime = 0, nLastPidExecTime = 0, nLastTempRequestTime = 0, nLastDisplayRefreshTime = 0;
 
@@ -261,7 +256,7 @@ void setup_menu()
 
     ms.get_root_menu().add_menu(&menu_i3);
     menu_i3.add_item(&menu_manualMode);
-    menu_i3.add_item(&menu_manualServoPos);
+    menu_i3.add_item(&menu_manualPower);
 
     ms.get_root_menu().add_menu(&menu_i4);
     menu_i4.add_item(&menu_loopDelay);
@@ -272,29 +267,23 @@ void setup_menu()
     nLastDisplayRefreshTime = millis();
 }
 
-void wait_for_attachment()
+void message_on_boot()
 {
-    servo.write(SERVO_MAX_DEG);
-
-    for (int i = 15; i > 0; --i)
+    unsigned long nStartTime = millis();
+    while(millis() < nStartTime+3000)
     {
         if (read_LCD_buttons() == btnRIGHT)
         {
             // skip init process if btnRIGHT is pressed
             break;
         }
-
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print(F("ATTACH @MAX NOW"));
+        lcd.print(F("GLUEHWOSTAT v2.0"));
         lcd.setCursor(7, 1);
-
-        lcd.print(i);
-        delay(1000);
+        lcd.print((int)((nStartTime+3000-millis())/1000));
+        delay(200); // so display does not blink
     }
-
-    servo.write(SERVO_MIN_DEG);
-    delay(1000);
 }
 
 void setTempActual(const float &fNew)
@@ -318,22 +307,26 @@ void setup()
 
     resetPidState();
 
-    servo.attach(SERVO_PIN);
+    pinMode(RELAIS_PIN, OUTPUT);
+    digitalWrite(RELAIS_PIN, LOW);
+
+    pinMode(TONE_PIN, OUTPUT);
 
     lcd.begin(16, 2);
 
-    wait_for_attachment();
+    message_on_boot();
 
     setup_menu(); // real menu
 
     // wait manually this time for temp reading if necessary
-    while (millis() - nLastTempRequestTime < DS18B20_WAIT) {}
+    while (millis() - nLastTempRequestTime < DS18B20_WAIT)
+    {
+    }
     setTempActual(tempSensor.getTempCByIndex(0));
 
     // request again but do not wait
     tempSensor.requestTemperatures();
     nLastTempRequestTime = millis();
-
 }
 
 void btn_handler()
@@ -393,7 +386,7 @@ void loop()
     unsigned long nNow = millis();
     unsigned long nLoopDelay = nNow - nLastLoopExecTime;
 
-    if(nNow-nLastTempRequestTime > DS18B20_WAIT)
+    if (nNow - nLastTempRequestTime > DS18B20_WAIT)
     {
         setTempActual(tempSensor.getTempCByIndex(0));
         tempSensor.requestTemperatures();
@@ -413,54 +406,56 @@ void loop()
             oPID.Compute(fCurrentErr);
             setPidOutput(fPidOutput);
 
-            fPwmNextDutyCycle = fPidOutput/PID_MAX_VALUE;
-            if(fPwmNextDutyCycle < PWM_MIN_DUTY_CYCLE_ABOVE_0 && fPwmNextDutyCycle > 0)
-            {
-                // round
-                if(fPwmNextDutyCycle >= PWM_MIN_DUTY_CYCLE_ABOVE_0 / 2)
-                {
-                    fPwmNextDutyCycle = PWM_MIN_DUTY_CYCLE_ABOVE_0;
-                }
-                else
-                {
-                    fPwmNextDutyCycle = 0;
-                }
-            }
+            fPwmNextDutyCycle = fPidOutput / PID_MAX_VALUE;
         }
-
-        // check whether to turn heater off
-        if(bHeaterOn)
-        {
-            if(nNow - nPwmBeginThisCycle > nPwmTimeOnCurrentCycle)
-            {
-                // turn off
-                servo.write(SERVO_MIN_DEG);
-                bHeaterOn = false;
-            }
-            // else wait until ON cycle is over
-        }
-
-        // check for cycle end
-        if(nNow - nPwmBeginThisCycle > PWM_CYCLE_LENGTH)
-        {
-            // turn on to begin new cycle
-            nPwmBeginThisCycle = nNow;
-            nPwmTimeOnCurrentCycle = (fPwmNextDutyCycle*PWM_CYCLE_LENGTH);
-            menu_curDutyCycle.set_value(nPwmTimeOnCurrentCycle);
-            Serial.println(fPwmNextDutyCycle);
-            Serial.println(nPwmTimeOnCurrentCycle);
-            if(nPwmTimeOnCurrentCycle > 0)
-            {
-                servo.write(SERVO_MAX_DEG);
-                bHeaterOn = true;
-            }
-        }
-
     }
     else
     {
         // manual mode
-        servo.write(menu_manualServoPos.get_value());
+        fPwmNextDutyCycle = menu_manualPower.get_value()/PID_MAX_VALUE;
+    }
+
+    // range check fPwmNextDutyCycle
+    if (fPwmNextDutyCycle < PWM_MIN_DUTY_CYCLE_ABOVE_0 && fPwmNextDutyCycle > 0)
+    {
+        // round
+        if (fPwmNextDutyCycle >= PWM_MIN_DUTY_CYCLE_ABOVE_0 / 2)
+        {
+            fPwmNextDutyCycle = PWM_MIN_DUTY_CYCLE_ABOVE_0;
+        }
+        else
+        {
+            fPwmNextDutyCycle = 0;
+        }
+    }
+    // TODO: PWM_MAX_DUTY_CYCLE_BELOW_MAX
+
+    // check whether to turn heater off
+    if (bHeaterOn)
+    {
+        if (nNow - nPwmBeginThisCycle > nPwmTimeOnCurrentCycle)
+        {
+            // turn off
+            digitalWrite(RELAIS_PIN, LOW);
+            bHeaterOn = false;
+        }
+        // else wait until ON cycle is over
+    }
+
+    // check for cycle end
+    if (nNow - nPwmBeginThisCycle > PWM_CYCLE_LENGTH)
+    {
+        // turn on to begin new cycle
+        nPwmBeginThisCycle = nNow;
+        nPwmTimeOnCurrentCycle = (fPwmNextDutyCycle * PWM_CYCLE_LENGTH);
+        menu_curDutyCycle.set_value(nPwmTimeOnCurrentCycle);
+        Serial.println(fPwmNextDutyCycle);
+        Serial.println(nPwmTimeOnCurrentCycle);
+        if (nPwmTimeOnCurrentCycle > 0)
+        {
+            digitalWrite(RELAIS_PIN, HIGH);
+            bHeaterOn = true;
+        }
     }
 
     btn_handler();
@@ -468,7 +463,7 @@ void loop()
     menu_loopDelay.set_value(nLoopDelay);
     nLastLoopExecTime = nNow;
 
-    if(nNow-nLastDisplayRefreshTime > 200)
+    if (nNow - nLastDisplayRefreshTime > 200)
     {
         ms.display();
         nLastDisplayRefreshTime = nNow;
