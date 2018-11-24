@@ -1,0 +1,30 @@
+#######################################
+##### Syntax Coloring Map For ArduPID #####
+#######################################
+
+#######################################
+######### Classes (KEYWORD1) ###########
+#######################################
+
+PID	KEYWORD1
+PID_IC	KEYWORD1
+PID_BC	KEYWORD1
+
+#######################################
+######### Functions (KEYWORD2) #########
+#######################################
+
+AutoCompute	KEYWORD2
+Compute	KEYWORD2
+SetSaturation	KEYWORD2
+SetTunings	KEYWORD2
+SetBackCalc KEYWORD2
+Reset	KEYWORD2
+GetKp	KEYWORD2
+GetKi	KEYWORD2
+GetKd	KEYWORD2
+GetKb	KEYWORD2
+
+#######################################
+########## Constants (LITERAL1) ##########
+#######################################
